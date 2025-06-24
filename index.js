@@ -62,6 +62,21 @@ async function run() {
       }
     });
 
+    app.delete("/parcels/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const result = await parcelCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        res.send(result);
+      } catch (error) {
+        console.error("Error deleting parcel:", error);
+        res.status(500).send({ message: "Failed to delete parcel" });
+      }
+    });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
