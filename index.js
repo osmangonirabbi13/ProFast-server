@@ -27,6 +27,11 @@ async function run() {
     const db = client.db("parcelDB"); // database name
     const parcelCollection = db.collection("parcels");
 
+    app.get("/parcels", async (req, res) => {
+      const parcels = await parcelCollection.find().toArray();
+      res.send(parcels);
+    });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
