@@ -1,16 +1,15 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 // Load environment variables from .env file
+
 dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
-
-// const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.PASS}@cluster0.jclxqqw.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
-
+const stripe = require("stripe")(process.env.PAYMENT_GATEWAY_KEY);
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(process.env.MONGODB_URI, {
   serverApi: {
@@ -33,22 +32,6 @@ async function run() {
     });
 
     // parcels api
-    // GET: All parcels OR parcels by user (created_by), sorted by latest
-    app.get("/parcels", async (req, res) => {
-      try {
-        const userEmail = req.query.email;
-        const query = userEmail ? { created_by: userEmail } : {};
-        const options = {
-          sort: { createdAt: -1 },
-        };
-
-        const parcels = await parcelCollection.find(query, options).toArray();
-        res.send(parcels);
-      } catch (error) {
-        console.error("Error fetching parcels:", error);
-        res.status(500).send({ message: "Failed to get parcels" });
-      }
-    });
 
     // POST: Create a new parcel
     app.post("/parcels", async (req, res) => {
@@ -59,6 +42,24 @@ async function run() {
       } catch (error) {
         console.error("Error inserting parcel:", error);
         res.status(500).send({ message: "Failed to create parcel" });
+      }
+    });
+
+    // GET: All parcels OR parcels by user (created_by), sorted by latest
+    app.get("/parcels", async (req, res) => {
+      try {
+        const userEmail = req.query.email;
+
+        const query = userEmail ? { created_by: userEmail } : {};
+        const options = {
+          sort: { createdAt: -1 }, // Newest first
+        };
+
+        const parcels = await parcelCollection.find(query, options).toArray();
+        res.send(parcels);
+      } catch (error) {
+        console.error("Error fetching parcels:", error);
+        res.status(500).send({ message: "Failed to get parcels" });
       }
     });
 
@@ -94,6 +95,21 @@ async function run() {
       } catch (error) {
         console.error("Error deleting parcel:", error);
         res.status(500).send({ message: "Failed to delete parcel" });
+      }
+    });
+
+    app.post("/create-payment-intent", async (req, res) => {
+      const amountInCents = req.body.amountInCents;
+      try {
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amountInCents, // Amount in cents
+          currency: "usd",
+          payment_method_types: ["card"],
+        });
+
+        res.json({ clientSecret: paymentIntent.client_secret });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
       }
     });
 
