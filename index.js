@@ -81,16 +81,6 @@ async function run() {
     // parcels api
 
     // POST: Create a new parcel
-    app.post("/parcels", async (req, res) => {
-      try {
-        const newParcel = req.body;
-        const result = await parcelCollection.insertOne(newParcel);
-        res.status(201).send(result);
-      } catch (error) {
-        console.error("Error inserting parcel:", error);
-        res.status(500).send({ message: "Failed to create parcel" });
-      }
-    });
 
     // GET: All parcels OR parcels by user (created_by), sorted by latest
     app.get("/parcels", verifyFBToken, async (req, res) => {
@@ -173,18 +163,29 @@ async function run() {
 
     app.patch("/riders/:id/status", async (req, res) => {
       const { id } = req.params;
-      const { status } = req.body;
+      const { status, email } = req.body;
       const query = { _id: new ObjectId(id) };
-      const updateDoc = {
-        $set: {
-          status,
-        },
-      };
+      const updateDoc = { $set: { status } };
 
       try {
         const result = await ridersCollection.updateOne(query, updateDoc);
+
+        if (status === "active" && email) {
+          const userQuery = {
+            email: { $regex: new RegExp(`^${email}$`, "i") },
+          };
+          const userUpdateDoc = { $set: { role: "rider" } };
+
+          const roleResult = await usersCollection.updateOne(
+            userQuery,
+            userUpdateDoc
+          );
+          console.log("User role update:", roleResult.modifiedCount);
+        }
+
         res.send(result);
       } catch (err) {
+        console.error("Error updating rider:", err);
         res.status(500).send({ message: "Failed to update rider status" });
       }
     });
