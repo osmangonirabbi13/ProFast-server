@@ -2,24 +2,26 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-var admin = require("firebase-admin");
+const admin = require("firebase-admin");
 
 // Load environment variables from .env file
-
 dotenv.config();
+
+const stripe = require("stripe")(process.env.PAYMENT_GATEWAY_KEY);
+
 const app = express();
 const port = process.env.PORT || 5000;
 
+// Middleware
 app.use(cors());
 app.use(express.json());
 
-var serviceAccount = require("./firebase-admin-key.json");
+const serviceAccount = require("./firebase-admin-key.json");
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-const stripe = require("stripe")(process.env.PAYMENT_GATEWAY_KEY);
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(process.env.MONGODB_URI, {
   serverApi: {
@@ -33,12 +35,14 @@ async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
-    const db = client.db("parcelDB");
+
+    const db = client.db("parcelDB"); // database name
     const usersCollection = db.collection("users");
     const parcelCollection = db.collection("parcels");
     const paymentsCollection = db.collection("payments");
     const ridersCollection = db.collection("riders");
 
+    // custom middlewares
     // custom middlewares
     const verifyFBToken = async (req, res, next) => {
       const authHeader = req.headers.authorization;
@@ -90,6 +94,7 @@ async function run() {
         res.status(500).send({ message: "Error searching users" });
       }
     });
+
     // GET: Get user role by email
     app.get("/users/:email/role", async (req, res) => {
       try {
@@ -151,22 +156,20 @@ async function run() {
       }
     );
 
-    app.get("/parcels", async (req, res) => {
-      const parcels = await parcelCollection.find().toArray();
-      res.send(parcels);
-    });
-
     // parcels api
-
-    // POST: Create a new parcel
-
     // GET: All parcels OR parcels by user (created_by), sorted by latest
     app.get("/parcels", verifyFBToken, async (req, res) => {
       try {
         const { email, payment_status, delivery_status } = req.query;
+        const loggedInEmail = req.decoded.email;
+
+        if (email && email !== loggedInEmail) {
+          return res.status(403).send({ message: "forbidden access" });
+        }
+
         let query = {};
         if (email) {
-          query = { created_by: email };
+          query.created_by = email;
         }
 
         if (payment_status) {
@@ -178,16 +181,47 @@ async function run() {
         }
 
         const options = {
-          sort: { createdAt: -1 }, // Newest first
+          sort: { creation_date: -1 }, // Note: creation_date or createdAt (DB field check)
         };
-
-        console.log("parcel query", req.query, query);
 
         const parcels = await parcelCollection.find(query, options).toArray();
         res.send(parcels);
       } catch (error) {
         console.error("Error fetching parcels:", error);
         res.status(500).send({ message: "Failed to get parcels" });
+      }
+    });
+
+    // GET: Get a specific parcel by ID
+    app.get("/parcels/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const parcel = await parcelCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!parcel) {
+          return res.status(404).send({ message: "Parcel not found" });
+        }
+
+        res.send(parcel);
+      } catch (error) {
+        console.error("Error fetching parcel:", error);
+        res.status(500).send({ message: "Failed to fetch parcel" });
+      }
+    });
+
+    // POST: Create a new parcel
+    app.post("/parcels", async (req, res) => {
+      try {
+        const newParcel = req.body;
+        // newParcel.createdAt = new Date();
+        const result = await parcelCollection.insertOne(newParcel);
+        res.status(201).send(result);
+      } catch (error) {
+        console.error("Error inserting parcel:", error);
+        res.status(500).send({ message: "Failed to create parcel" });
       }
     });
 
@@ -222,26 +256,6 @@ async function run() {
       } catch (err) {
         console.error(err);
         res.status(500).send({ message: "Failed to assign rider" });
-      }
-    });
-
-    // GET: Get a specific parcel by ID
-    app.get("/parcels/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-
-        const parcel = await parcelCollection.findOne({
-          _id: new ObjectId(id),
-        });
-
-        if (!parcel) {
-          return res.status(404).send({ message: "Parcel not found" });
-        }
-
-        res.send(parcel);
-      } catch (error) {
-        console.error("Error fetching parcel:", error);
-        res.status(500).send({ message: "Failed to fetch parcel" });
       }
     });
 
@@ -308,49 +322,33 @@ async function run() {
       const { id } = req.params;
       const { status, email } = req.body;
       const query = { _id: new ObjectId(id) };
-      const updateDoc = { $set: { status } };
+      const updateDoc = {
+        $set: {
+          status,
+        },
+      };
 
       try {
         const result = await ridersCollection.updateOne(query, updateDoc);
 
-        if (status === "active" && email) {
-          const userQuery = {
-            email: { $regex: new RegExp(`^${email}$`, "i") },
+        // update user role for accepting rider
+        if (status === "active") {
+          const userQuery = { email };
+          const userUpdateDoc = {
+            $set: {
+              role: "rider",
+            },
           };
-          const userUpdateDoc = { $set: { role: "rider" } };
-
           const roleResult = await usersCollection.updateOne(
             userQuery,
             userUpdateDoc
           );
-          console.log("User role update:", roleResult.modifiedCount);
+          console.log(roleResult.modifiedCount);
         }
 
         res.send(result);
       } catch (err) {
-        console.error("Error updating rider:", err);
         res.status(500).send({ message: "Failed to update rider status" });
-      }
-    });
-
-    app.get("/payments", verifyFBToken, async (req, res) => {
-      try {
-        const userEmail = req.query.email;
-        console.log("decocded", req.decoded);
-        if (req.decoded.email !== userEmail) {
-          return res.status(403).send({ message: "forbidden access" });
-        }
-
-        const query = userEmail ? { email: userEmail } : {};
-        const options = { sort: { paid_at: -1 } };
-
-        const payments = await paymentsCollection
-          .find(query, options)
-          .toArray();
-        res.send(payments);
-      } catch (error) {
-        console.error("Error fetching payment history:", error);
-        res.status(500).send({ message: "Failed to get payments" });
       }
     });
 
@@ -376,6 +374,28 @@ async function run() {
       res.send({ success: true, insertedId: result.insertedId });
     });
 
+    app.get("/payments", verifyFBToken, async (req, res) => {
+      try {
+        const userEmail = req.query.email;
+        console.log("decocded", req.decoded);
+        if (req.decoded.email !== userEmail) {
+          return res.status(403).send({ message: "forbidden access" });
+        }
+
+        const query = userEmail ? { email: userEmail } : {};
+        const options = { sort: { paid_at: -1 } }; // Latest first
+
+        const payments = await paymentsCollection
+          .find(query, options)
+          .toArray();
+        res.send(payments);
+      } catch (error) {
+        console.error("Error fetching payment history:", error);
+        res.status(500).send({ message: "Failed to get payments" });
+      }
+    });
+
+    // POST: Record payment and update parcel status
     app.post("/payments", async (req, res) => {
       try {
         const { parcelId, email, amount, paymentMethod, transactionId } =
