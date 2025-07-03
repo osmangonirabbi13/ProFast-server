@@ -16,7 +16,10 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-const serviceAccount = require("./firebase-admin-key.json");
+const decodedKey = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+  "utf8"
+);
+const serviceAccount = JSON.parse(decodedKey);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -34,7 +37,7 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
     const db = client.db("parcelDB"); // database name
     const usersCollection = db.collection("users");
@@ -170,18 +173,26 @@ async function run() {
     // GET: All parcels OR parcels by user (created_by), sorted by latest
     app.get("/parcels", verifyFBToken, async (req, res) => {
       try {
-        const { email, payment_status, delivery_status } = req.query;
+        const { email, payment_status, delivery_status, rider_email } =
+          req.query;
         let query = {};
-        if (email) {
-          query = { created_by: email };
-        }
 
-        if (payment_status) {
-          query.payment_status = payment_status;
-        }
-
-        if (delivery_status) {
-          query.delivery_status = delivery_status;
+        // If rider_email is provided, filter parcels delivered by that rider only
+        if (rider_email) {
+          query.rider_email = rider_email;
+          // Only show parcels that are delivered for rider
+          query.delivery_status = "delivered";
+        } else {
+          // Normal user query by created_by email
+          if (email) {
+            query.created_by = email;
+          }
+          if (payment_status) {
+            query.payment_status = payment_status;
+          }
+          if (delivery_status) {
+            query.delivery_status = delivery_status;
+          }
         }
 
         const options = {
@@ -216,6 +227,29 @@ async function run() {
         console.error("Error fetching parcel:", error);
         res.status(500).send({ message: "Failed to fetch parcel" });
       }
+    });
+
+    app.get("/parcels/delivery/status-count", async (req, res) => {
+      const pipeline = [
+        {
+          $group: {
+            _id: "$delivery_status",
+            count: {
+              $sum: 1,
+            },
+          },
+        },
+        {
+          $project: {
+            status: "$_id",
+            count: 1,
+            _id: 0,
+          },
+        },
+      ];
+
+      const result = await parcelsCollection.aggregate(pipeline).toArray();
+      res.send(result);
     });
 
     app.get("/parcels/delivery/status-count", async (req, res) => {
@@ -435,6 +469,15 @@ async function run() {
 
     app.post("/riders", async (req, res) => {
       const rider = req.body;
+
+      // ✅ Check if this email already exists
+      const existing = await ridersCollection.findOne({ email: rider.email });
+      if (existing) {
+        return res
+          .status(409)
+          .send({ message: "Already applied with this email" });
+      }
+
       const result = await ridersCollection.insertOne(rider);
       res.send(result);
     });
@@ -615,7 +658,7 @@ async function run() {
     });
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
