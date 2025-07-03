@@ -259,6 +259,32 @@ async function run() {
       }
     });
 
+    app.patch("/parcels/:id/status", async (req, res) => {
+      const parcelId = req.params.id;
+      const { status } = req.body;
+      const updatedDoc = {
+        delivery_status: status,
+      };
+
+      if (status === "in_transit") {
+        updatedDoc.picked_at = new Date().toISOString();
+      } else if (status === "delivered") {
+        updatedDoc.delivered_at = new Date().toISOString();
+      }
+
+      try {
+        const result = await parcelsCollection.updateOne(
+          { _id: new ObjectId(parcelId) },
+          {
+            $set: updatedDoc,
+          }
+        );
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to update status" });
+      }
+    });
+
     app.delete("/parcels/:id", async (req, res) => {
       try {
         const id = req.params.id;
