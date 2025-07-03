@@ -3,19 +3,20 @@
 This is the backend for **QuickDrop Courier**, a parcel delivery web application. It handles user authentication (Firebase Admin SDK), role management, parcel tracking, and database operations using MongoDB.
 
 ---
-##🔗 Live Site
+## Live Site
+
 https://profast-courier.web.app/
 
 ---
 ## Admin Login
-link : https://profast-courier.web.app/dashboard
-Email : admin@gmail.com	
-Password : 123456
+link : https://profast-courier.web.app/dashboard  <br/>
+Email : admin@gmail.com	 <br/>
+Password : 123456 <br/>
 ---
 ## Rider Login
-link : https://profast-courier.web.app/dashboard
-Email : rider@gmail.com
-Password : 123456
+link : https://profast-courier.web.app/dashboard   <br/>
+Email : rider@gmail.com   <br/>
+Password : 123456  <br/>
 ---
 ## 📌 About
 
